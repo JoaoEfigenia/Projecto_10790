@@ -212,9 +212,8 @@ def registar_partida():
         return
 
     data = input("Data da partida (YYYY-MM-DD): ")
-
     listar_jogadores()
-    vencedor_id = input("ID do jogador vencedor: ")
+    vencedor_id = input("ID do vencedor: ")
 
     cursor.execute("SELECT * FROM Jogadores WHERE id = ?", (vencedor_id,))
     vencedor = cursor.fetchone()
@@ -223,32 +222,15 @@ def registar_partida():
         conn.close()
         return
 
-    cursor.execute('''
-        INSERT INTO Partidas (id_jogo, data, vencedor_id) VALUES (?, ?, ?)
-    ''', (id_jogo, data, vencedor_id))
+    cursor.execute("INSERT INTO Partidas (id_jogo, data, vencedor_id) VALUES (?, ?, ?)", (id_jogo, data, vencedor_id))
     partida_id = cursor.lastrowid
 
-    print("Informe os IDs dos jogadores que participaram da partida, separados por vírgula (ex: 1,3,5):")
-    jogadores_input = input("IDs dos jogadores: ")
-    jogadores_ids = [j.strip() for j in jogadores_input.split(",") if j.strip().isdigit()]
-
-    jogadores_validos = []
-    for j_id in jogadores_ids:
+    jogadores_partida = input("IDs dos jogadores participantes (separados por vírgula): ").split(",")
+    for j_id in jogadores_partida:
+        j_id = j_id.strip()
         cursor.execute("SELECT * FROM Jogadores WHERE id = ?", (j_id,))
-        jogador = cursor.fetchone()
-        if jogador:
-            jogadores_validos.append(j_id)
-        else:
-            print(f"Jogador com ID {j_id} não encontrado e será ignorado.")
-
-    for j_id in jogadores_validos:
-        cursor.execute('''
-            INSERT INTO Partidas_Jogadores (id_partida, id_jogador) VALUES (?, ?)
-        ''', (partida_id, j_id))
-
-    cursor.execute('''
-        UPDATE Jogadores SET vitorias = vitorias + 1 WHERE id = ?
-    ''', (vencedor_id,))
+        if cursor.fetchone():
+            cursor.execute("INSERT INTO Partidas_Jogadores (id_partida, id_jogador) VALUES (?, ?)", (partida_id, j_id))
 
     conn.commit()
     conn.close()
@@ -259,11 +241,10 @@ def listar_partidas():
     cursor = conn.cursor()
 
     cursor.execute('''
-        SELECT Partidas.id, Jogos.nome, Partidas.data, Jogadores.nome
-        FROM Partidas
-        JOIN Jogos ON Partidas.id_jogo = Jogos.id
-        JOIN Jogadores ON Partidas.vencedor_id = Jogadores.id
-        ORDER BY Partidas.data DESC
+        SELECT p.id, j.nome, p.data, jog.nome
+        FROM Partidas p
+        LEFT JOIN Jogos j ON p.id_jogo = j.id
+        LEFT JOIN Jogadores jog ON p.vencedor_id = jog.id
     ''')
     partidas = cursor.fetchall()
 
@@ -274,18 +255,20 @@ def listar_partidas():
 
     for partida in partidas:
         partida_id = partida[0]
-        print(f"ID: {partida_id}, Jogo: {partida[1]}, Data: {partida[2]}, Vencedor: {partida[3]}")
+        jogo_nome = partida[1]
+        data = partida[2]
+        vencedor_nome = partida[3]
 
         cursor.execute('''
-            SELECT Jogadores.nome
-            FROM Partidas_Jogadores
-            JOIN Jogadores ON Partidas_Jogadores.id_jogador = Jogadores.id
-            WHERE Partidas_Jogadores.id_partida = ?
+            SELECT jog.nome
+            FROM Partidas_Jogadores pj
+            JOIN Jogadores jog ON pj.id_jogador = jog.id
+            WHERE pj.id_partida = ?
         ''', (partida_id,))
-        jogadores_partida = cursor.fetchall()
-        nomes = ", ".join(j[0] for j in jogadores_partida)
-        print(f"Jogadores que participaram: {nomes}")
-        print("-" * 40)
+        jogadores = cursor.fetchall()
+        nomes_jogadores = ", ".join([j[0] for j in jogadores])
+
+        print(f"ID: {partida_id}, Jogo: {jogo_nome}, Data: {data}, Vencedor: {vencedor_nome}, Jogadores: {nomes_jogadores}")
 
     conn.close()
 
@@ -303,15 +286,138 @@ def eliminar_partida():
         conn.close()
         return
 
-    confirm = input(f"Tem certeza que quer eliminar a partida de ID '{partida_id}'? (S/N): ").upper()
+    confirm = input("Tem certeza que quer eliminar esta partida? (S/N): ").upper()
     if confirm == 'S':
-        cursor.execute("DELETE FROM Partidas WHERE id = ?", (partida_id,))
         cursor.execute("DELETE FROM Partidas_Jogadores WHERE id_partida = ?", (partida_id,))
+        cursor.execute("DELETE FROM Partidas WHERE id = ?", (partida_id,))
         conn.commit()
         print("Partida eliminada com sucesso!")
     else:
         print("Eliminação cancelada.")
     conn.close()
+
+def filtrar_jogos():
+    print("Preencha os filtros desejados (deixe vazio para ignorar):")
+    nome = input("Nome: ").strip()
+    genero = input("Género: ").strip()
+    max_jogadores = input("Número máximo de jogadores: ").strip()
+    dependencia_lingua = input("Dependência de língua (S/N): ").strip().upper()
+    complexidade_min = input("Complexidade mínima (1 a 5): ").strip()
+    complexidade_max = input("Complexidade máxima (1 a 5): ").strip()
+    
+    filtro_nao_jogados = input("Filtrar jogos que o jogador ainda não jogou? (S/N): ").strip().upper()
+    
+    jogador_id = None
+    if filtro_nao_jogados == "S":
+        jogador_nome = input("Nome do jogador para filtro: ").strip()
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM Jogadores WHERE nome = ?", (jogador_nome,))
+        resultado = cursor.fetchone()
+        if resultado:
+            jogador_id = resultado[0]
+        else:
+            print(f"Jogador '{jogador_nome}' não encontrado. Ignorando filtro de não jogados.")
+        conn.close()
+
+    query = "SELECT id, nome, genero, max_jogadores, dependencia_lingua, complexidade, link_bgg FROM Jogos WHERE 1=1"
+    params = []
+
+    if nome:
+        query += " AND nome LIKE ?"
+        params.append(f"%{nome}%")
+    if genero:
+        query += " AND genero LIKE ?"
+        params.append(f"%{genero}%")
+    if max_jogadores:
+        try:
+            max_jog = int(max_jogadores)
+            query += " AND max_jogadores = ?"
+            params.append(max_jog)
+        except ValueError:
+            print("Número máximo de jogadores inválido, ignorando este filtro.")
+    if dependencia_lingua in ("S", "N"):
+        query += " AND dependencia_lingua = ?"
+        params.append(dependencia_lingua)
+    if complexidade_min:
+        try:
+            cmin = float(complexidade_min)
+            query += " AND complexidade >= ?"
+            params.append(cmin)
+        except ValueError:
+            print("Complexidade mínima inválida, ignorando este filtro.")
+    if complexidade_max:
+        try:
+            cmax = float(complexidade_max)
+            query += " AND complexidade <= ?"
+            params.append(cmax)
+        except ValueError:
+            print("Complexidade máxima inválida, ignorando este filtro.")
+
+    if jogador_id:
+        query = f'''
+            SELECT j.id, j.nome, j.genero, j.max_jogadores, j.dependencia_lingua, j.complexidade, j.link_bgg
+            FROM Jogos j
+            WHERE j.id NOT IN (
+                SELECT id_jogo FROM Partidas p
+                INNER JOIN Partidas_Jogadores pj ON p.id = pj.id_partida
+                WHERE pj.id_jogador = ?
+            )
+        '''
+        filtros_restantes = []
+        params_restantes = [jogador_id]
+
+        if nome:
+            filtros_restantes.append("j.nome LIKE ?")
+            params_restantes.append(f"%{nome}%")
+        if genero:
+            filtros_restantes.append("j.genero LIKE ?")
+            params_restantes.append(f"%{genero}%")
+        if max_jogadores:
+            try:
+                max_jog = int(max_jogadores)
+                filtros_restantes.append("j.max_jogadores = ?")
+                params_restantes.append(max_jog)
+            except ValueError:
+                pass
+        if dependencia_lingua in ("S", "N"):
+            filtros_restantes.append("j.dependencia_lingua = ?")
+            params_restantes.append(dependencia_lingua)
+        if complexidade_min:
+            try:
+                cmin = float(complexidade_min)
+                filtros_restantes.append("j.complexidade >= ?")
+                params_restantes.append(cmin)
+            except ValueError:
+                pass
+        if complexidade_max:
+            try:
+                cmax = float(complexidade_max)
+                filtros_restantes.append("j.complexidade <= ?")
+                params_restantes.append(cmax)
+            except ValueError:
+                pass
+
+        if filtros_restantes:
+            query += " AND " + " AND ".join(filtros_restantes)
+
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute(query, params_restantes)
+        jogos = cursor.fetchall()
+        conn.close()
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        jogos = cursor.fetchall()
+        conn.close()
+
+    if not jogos:
+        print("Nenhum jogo encontrado com esses filtros.")
+    else:
+        for jogo in jogos:
+            print(f"ID: {jogo[0]}, Nome: {jogo[1]}, Género: {jogo[2]}, Max Jogadores: {jogo[3]}, Dependência Língua: {jogo[4]}, Complexidade: {jogo[5]}, Link BGG: {jogo[6]}")
 
 def menu_jogos():
     while True:
@@ -320,22 +426,24 @@ def menu_jogos():
         print("2 - Editar Jogo")
         print("3 - Eliminar Jogo")
         print("4 - Listar Jogos")
+        print("5 - Filtrar Jogos")
         print("0 - Voltar")
+        escolha = input("Escolha uma opção: ")
 
-        opcao = input("Escolha uma opção: ")
-
-        if opcao == "1":
+        if escolha == "1":
             adicionar_jogo()
-        elif opcao == "2":
+        elif escolha == "2":
             editar_jogo()
-        elif opcao == "3":
+        elif escolha == "3":
             eliminar_jogo()
-        elif opcao == "4":
+        elif escolha == "4":
             listar_jogos()
-        elif opcao == "0":
+        elif escolha == "5":
+            filtrar_jogos()
+        elif escolha == "0":
             break
         else:
-            print("Opção inválida, tente novamente.")
+            print("Opção inválida.")
 
 def menu_jogadores():
     while True:
@@ -344,19 +452,18 @@ def menu_jogadores():
         print("2 - Listar Jogadores")
         print("3 - Eliminar Jogador")
         print("0 - Voltar")
+        escolha = input("Escolha uma opção: ")
 
-        opcao = input("Escolha uma opção: ")
-
-        if opcao == "1":
+        if escolha == "1":
             adicionar_jogador()
-        elif opcao == "2":
+        elif escolha == "2":
             listar_jogadores()
-        elif opcao == "3":
+        elif escolha == "3":
             eliminar_jogador()
-        elif opcao == "0":
+        elif escolha == "0":
             break
         else:
-            print("Opção inválida, tente novamente.")
+            print("Opção inválida.")
 
 def menu_partidas():
     while True:
@@ -365,21 +472,20 @@ def menu_partidas():
         print("2 - Listar Partidas")
         print("3 - Eliminar Partida")
         print("0 - Voltar")
+        escolha = input("Escolha uma opção: ")
 
-        opcao = input("Escolha uma opção: ")
-
-        if opcao == "1":
+        if escolha == "1":
             registar_partida()
-        elif opcao == "2":
+        elif escolha == "2":
             listar_partidas()
-        elif opcao == "3":
+        elif escolha == "3":
             eliminar_partida()
-        elif opcao == "0":
+        elif escolha == "0":
             break
         else:
-            print("Opção inválida, tente novamente.")
+            print("Opção inválida.")
 
-def menu():
+def menu_principal():
     criar_bd()
     while True:
         print("\n--- Menu Principal ---")
@@ -387,20 +493,19 @@ def menu():
         print("2 - Jogadores")
         print("3 - Partidas")
         print("0 - Sair")
+        escolha = input("Escolha uma opção: ")
 
-        opcao = input("Escolha uma opção: ")
-
-        if opcao == "1":
+        if escolha == "1":
             menu_jogos()
-        elif opcao == "2":
+        elif escolha == "2":
             menu_jogadores()
-        elif opcao == "3":
+        elif escolha == "3":
             menu_partidas()
-        elif opcao == "0":
-            print("Até logo!")
+        elif escolha == "0":
+            print("Adeus!")
             break
         else:
-            print("Opção inválida, tente novamente.")
+            print("Opção inválida.")
 
 if __name__ == "__main__":
-    menu()
+    menu_principal()
