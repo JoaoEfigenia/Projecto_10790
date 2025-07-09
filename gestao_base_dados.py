@@ -30,6 +30,17 @@ def criar_bd():
         );
     ''')
 
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS Partidas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id_jogo INTEGER NOT NULL,
+            data TEXT NOT NULL,
+            vencedor_id INTEGER NOT NULL,
+            FOREIGN KEY (id_jogo) REFERENCES Jogos(id),
+            FOREIGN KEY (vencedor_id) REFERENCES Jogadores(id)
+        );
+    ''')
+
     conn.commit()
     conn.close()
 
@@ -154,6 +165,64 @@ def listar_jogadores():
         for jogador in jogadores:
             print(f"ID: {jogador[0]}, Nome: {jogador[1]}, Vitórias: {jogador[2]}")
 
+def registar_partida():
+    listar_jogos()
+    id_jogo = input("ID do jogo jogado: ")
+    data = input("Data da partida (YYYY-MM-DD): ")
+
+    listar_jogadores()
+    vencedor_id = input("ID do jogador vencedor: ")
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        INSERT INTO Partidas (id_jogo, data, vencedor_id)
+        VALUES (?, ?, ?)
+    ''', (id_jogo, data, vencedor_id))
+
+    partida_id = cursor.lastrowid
+
+    cursor.execute('''
+        UPDATE Jogadores SET vitorias = vitorias + 1
+        WHERE id = ?
+    ''', (vencedor_id,))
+
+    print("Indique os IDs dos jogadores que participaram, separados por vírgulas.")
+    ids_str = input("IDs dos jogadores: ")
+    ids = [id.strip() for id in ids_str.split(",")]
+
+    for jogador_id in ids:
+        cursor.execute('''
+            INSERT INTO ParticipantesPartida (id_partida, id_jogador)
+            VALUES (?, ?)
+        ''', (partida_id, jogador_id))
+
+    conn.commit()
+    conn.close()
+    print("Partida registada com sucesso.")
+
+def listar_partidas():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT Partidas.id, Jogos.nome, Partidas.data, Jogadores.nome
+        FROM Partidas
+        JOIN Jogos ON Partidas.id_jogo = Jogos.id
+        JOIN Jogadores ON Partidas.vencedor_id = Jogadores.id
+        ORDER BY Partidas.data DESC
+    ''')
+
+    partidas = cursor.fetchall()
+    conn.close()
+
+    if not partidas:
+        print("Não há partidas registadas.")
+    else:
+        for partida in partidas:
+            print(f"ID: {partida[0]}, Jogo: {partida[1]}, Data: {partida[2]}, Vencedor: {partida[3]}")
+
 def menu():
     criar_bd()
     while True:
@@ -164,6 +233,8 @@ def menu():
         print("4 - Eliminar Jogo")
         print("5 - Adicionar Jogador")
         print("6 - Listar Jogadores")
+        print("7 - Registar Partida")
+        print("8 - Listar Partidas")
         print("0 - Sair")
 
         opcao = input("Escolha uma opção: ")
@@ -180,6 +251,10 @@ def menu():
             adicionar_jogador()
         elif opcao == "6":
             listar_jogadores()
+        elif opcao == "7":
+            registar_partida()
+        elif opcao == "8":
+            listar_partidas()
         elif opcao == "0":
             print("Até logo!")
             break
