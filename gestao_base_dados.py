@@ -33,11 +33,20 @@ def criar_bd():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS Partidas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            id_jogo INTEGER NOT NULL,
-            data TEXT NOT NULL,
-            vencedor_id INTEGER NOT NULL,
+            id_jogo INTEGER,
+            data TEXT,
+            vencedor_id INTEGER,
             FOREIGN KEY (id_jogo) REFERENCES Jogos(id),
             FOREIGN KEY (vencedor_id) REFERENCES Jogadores(id)
+        );
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS Partidas_Jogadores (
+            id_partida INTEGER,
+            id_jogador INTEGER,
+            FOREIGN KEY (id_partida) REFERENCES Partidas(id),
+            FOREIGN KEY (id_jogador) REFERENCES Jogadores(id)
         );
     ''')
 
@@ -165,42 +174,85 @@ def listar_jogadores():
         for jogador in jogadores:
             print(f"ID: {jogador[0]}, Nome: {jogador[1]}, Vitórias: {jogador[2]}")
 
+def eliminar_jogador():
+    listar_jogadores()
+    jogador_id = input("ID do jogador que quer eliminar: ")
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM Jogadores WHERE id = ?", (jogador_id,))
+    jogador = cursor.fetchone()
+    if not jogador:
+        print("Jogador não encontrado.")
+        conn.close()
+        return
+
+    confirm = input(f"Tem certeza que quer eliminar o jogador '{jogador[1]}'? (S/N): ").upper()
+    if confirm == 'S':
+        cursor.execute("DELETE FROM Jogadores WHERE id = ?", (jogador_id,))
+        conn.commit()
+        print("Jogador eliminado com sucesso!")
+    else:
+        print("Eliminação cancelada.")
+    conn.close()
+
 def registar_partida():
     listar_jogos()
     id_jogo = input("ID do jogo jogado: ")
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM Jogos WHERE id = ?", (id_jogo,))
+    jogo = cursor.fetchone()
+    if not jogo:
+        print("Jogo não encontrado.")
+        conn.close()
+        return
+
     data = input("Data da partida (YYYY-MM-DD): ")
 
     listar_jogadores()
     vencedor_id = input("ID do jogador vencedor: ")
 
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM Jogadores WHERE id = ?", (vencedor_id,))
+    vencedor = cursor.fetchone()
+    if not vencedor:
+        print("Jogador vencedor não encontrado.")
+        conn.close()
+        return
 
     cursor.execute('''
-        INSERT INTO Partidas (id_jogo, data, vencedor_id)
-        VALUES (?, ?, ?)
+        INSERT INTO Partidas (id_jogo, data, vencedor_id) VALUES (?, ?, ?)
     ''', (id_jogo, data, vencedor_id))
-
     partida_id = cursor.lastrowid
 
-    cursor.execute('''
-        UPDATE Jogadores SET vitorias = vitorias + 1
-        WHERE id = ?
-    ''', (vencedor_id,))
+    print("Informe os IDs dos jogadores que participaram da partida, separados por vírgula (ex: 1,3,5):")
+    jogadores_input = input("IDs dos jogadores: ")
+    jogadores_ids = [j.strip() for j in jogadores_input.split(",") if j.strip().isdigit()]
 
-    print("Indique os IDs dos jogadores que participaram, separados por vírgulas.")
-    ids_str = input("IDs dos jogadores: ")
-    ids = [id.strip() for id in ids_str.split(",")]
+    jogadores_validos = []
+    for j_id in jogadores_ids:
+        cursor.execute("SELECT * FROM Jogadores WHERE id = ?", (j_id,))
+        jogador = cursor.fetchone()
+        if jogador:
+            jogadores_validos.append(j_id)
+        else:
+            print(f"Jogador com ID {j_id} não encontrado e será ignorado.")
 
-    for jogador_id in ids:
+    for j_id in jogadores_validos:
         cursor.execute('''
-            INSERT INTO ParticipantesPartida (id_partida, id_jogador)
-            VALUES (?, ?)
-        ''', (partida_id, jogador_id))
+            INSERT INTO Partidas_Jogadores (id_partida, id_jogador) VALUES (?, ?)
+        ''', (partida_id, j_id))
+
+    cursor.execute('''
+        UPDATE Jogadores SET vitorias = vitorias + 1 WHERE id = ?
+    ''', (vencedor_id,))
 
     conn.commit()
     conn.close()
-    print("Partida registada com sucesso.")
+    print("Partida registada com sucesso!")
 
 def listar_partidas():
     conn = sqlite3.connect(DB_PATH)
@@ -213,48 +265,137 @@ def listar_partidas():
         JOIN Jogadores ON Partidas.vencedor_id = Jogadores.id
         ORDER BY Partidas.data DESC
     ''')
-
     partidas = cursor.fetchall()
-    conn.close()
 
     if not partidas:
         print("Não há partidas registadas.")
-    else:
-        for partida in partidas:
-            print(f"ID: {partida[0]}, Jogo: {partida[1]}, Data: {partida[2]}, Vencedor: {partida[3]}")
+        conn.close()
+        return
 
-def menu():
-    criar_bd()
+    for partida in partidas:
+        partida_id = partida[0]
+        print(f"ID: {partida_id}, Jogo: {partida[1]}, Data: {partida[2]}, Vencedor: {partida[3]}")
+
+        cursor.execute('''
+            SELECT Jogadores.nome
+            FROM Partidas_Jogadores
+            JOIN Jogadores ON Partidas_Jogadores.id_jogador = Jogadores.id
+            WHERE Partidas_Jogadores.id_partida = ?
+        ''', (partida_id,))
+        jogadores_partida = cursor.fetchall()
+        nomes = ", ".join(j[0] for j in jogadores_partida)
+        print(f"Jogadores que participaram: {nomes}")
+        print("-" * 40)
+
+    conn.close()
+
+def eliminar_partida():
+    listar_partidas()
+    partida_id = input("ID da partida que quer eliminar: ")
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM Partidas WHERE id = ?", (partida_id,))
+    partida = cursor.fetchone()
+    if not partida:
+        print("Partida não encontrada.")
+        conn.close()
+        return
+
+    confirm = input(f"Tem certeza que quer eliminar a partida de ID '{partida_id}'? (S/N): ").upper()
+    if confirm == 'S':
+        cursor.execute("DELETE FROM Partidas WHERE id = ?", (partida_id,))
+        cursor.execute("DELETE FROM Partidas_Jogadores WHERE id_partida = ?", (partida_id,))
+        conn.commit()
+        print("Partida eliminada com sucesso!")
+    else:
+        print("Eliminação cancelada.")
+    conn.close()
+
+def menu_jogos():
     while True:
-        print("\n--- Menu ---")
+        print("\n--- Menu Jogos ---")
         print("1 - Adicionar Jogo")
-        print("2 - Listar Jogos")
-        print("3 - Editar Jogo")
-        print("4 - Eliminar Jogo")
-        print("5 - Adicionar Jogador")
-        print("6 - Listar Jogadores")
-        print("7 - Registar Partida")
-        print("8 - Listar Partidas")
-        print("0 - Sair")
+        print("2 - Editar Jogo")
+        print("3 - Eliminar Jogo")
+        print("4 - Listar Jogos")
+        print("0 - Voltar")
 
         opcao = input("Escolha uma opção: ")
 
         if opcao == "1":
             adicionar_jogo()
         elif opcao == "2":
-            listar_jogos()
-        elif opcao == "3":
             editar_jogo()
-        elif opcao == "4":
+        elif opcao == "3":
             eliminar_jogo()
-        elif opcao == "5":
+        elif opcao == "4":
+            listar_jogos()
+        elif opcao == "0":
+            break
+        else:
+            print("Opção inválida, tente novamente.")
+
+def menu_jogadores():
+    while True:
+        print("\n--- Menu Jogadores ---")
+        print("1 - Adicionar Jogador")
+        print("2 - Listar Jogadores")
+        print("3 - Eliminar Jogador")
+        print("0 - Voltar")
+
+        opcao = input("Escolha uma opção: ")
+
+        if opcao == "1":
             adicionar_jogador()
-        elif opcao == "6":
+        elif opcao == "2":
             listar_jogadores()
-        elif opcao == "7":
+        elif opcao == "3":
+            eliminar_jogador()
+        elif opcao == "0":
+            break
+        else:
+            print("Opção inválida, tente novamente.")
+
+def menu_partidas():
+    while True:
+        print("\n--- Menu Partidas ---")
+        print("1 - Registar Partida")
+        print("2 - Listar Partidas")
+        print("3 - Eliminar Partida")
+        print("0 - Voltar")
+
+        opcao = input("Escolha uma opção: ")
+
+        if opcao == "1":
             registar_partida()
-        elif opcao == "8":
+        elif opcao == "2":
             listar_partidas()
+        elif opcao == "3":
+            eliminar_partida()
+        elif opcao == "0":
+            break
+        else:
+            print("Opção inválida, tente novamente.")
+
+def menu():
+    criar_bd()
+    while True:
+        print("\n--- Menu Principal ---")
+        print("1 - Jogos")
+        print("2 - Jogadores")
+        print("3 - Partidas")
+        print("0 - Sair")
+
+        opcao = input("Escolha uma opção: ")
+
+        if opcao == "1":
+            menu_jogos()
+        elif opcao == "2":
+            menu_jogadores()
+        elif opcao == "3":
+            menu_partidas()
         elif opcao == "0":
             print("Até logo!")
             break
