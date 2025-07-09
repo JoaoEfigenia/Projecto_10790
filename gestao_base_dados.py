@@ -59,6 +59,53 @@ def listar_jogos(filtro_genero=None, filtro_max_jogadores=None, filtro_dependenc
     else:
         print("Nenhum jogo encontrado com os filtros aplicados.")
 
+def alterar_jogo(id_jogo, nome=None, genero=None, max_jogadores=None, dependencia_lingua=None, complexidade=None, link_bgg=None):
+    conn = sqlite3.connect("db/biblioteca_jogos.db")
+    cursor = conn.cursor()
+    
+    campos = []
+    parametros = []
+    
+    if nome is not None:
+        campos.append("nome = ?")
+        parametros.append(nome)
+    if genero is not None:
+        campos.append("genero = ?")
+        parametros.append(genero)
+    if max_jogadores is not None:
+        campos.append("max_jogadores = ?")
+        parametros.append(max_jogadores)
+    if dependencia_lingua is not None:
+        campos.append("dependencia_lingua = ?")
+        parametros.append(dependencia_lingua)
+    if complexidade is not None:
+        campos.append("complexidade = ?")
+        parametros.append(complexidade)
+    if link_bgg is not None:
+        campos.append("link_bgg = ?")
+        parametros.append(link_bgg)
+    
+    if not campos:
+        print("Nenhum campo para atualizar.")
+        conn.close()
+        return
+    
+    parametros.append(id_jogo)
+    query = f"UPDATE Jogos SET {', '.join(campos)} WHERE id = ?"
+    
+    cursor.execute(query, parametros)
+    conn.commit()
+    conn.close()
+    print(f"Jogo com ID {id_jogo} atualizado com sucesso!")
+
+def eliminar_jogo(id_jogo):
+    conn = sqlite3.connect("db/biblioteca_jogos.db")
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM Jogos WHERE id = ?", (id_jogo,))
+    conn.commit()
+    conn.close()
+    print(f"Jogo com ID {id_jogo} eliminado com sucesso!")
+
 def menu():
     criar_bd()
     while True:
@@ -66,6 +113,8 @@ def menu():
         print("1. Inserir novo jogo")
         print("2. Listar todos os jogos")
         print("3. Listar jogos filtrados")
+        print("4. Alterar jogo")
+        print("5. Eliminar jogo")
         print("0. Sair")
         opcao = input("Escolha uma opção: ")
 
@@ -90,6 +139,24 @@ def menu():
             filtro_complexidade_max = float(filtro_complexidade_max) if filtro_complexidade_max else None
 
             listar_jogos(filtro_genero, filtro_max_jogadores, filtro_dependencia_lingua, filtro_complexidade_max)
+
+        elif opcao == "4":
+            id_jogo = int(input("ID do jogo a alterar: "))
+            print("Deixe em branco para não alterar o campo.")
+            nome = input("Novo nome: ").strip() or None
+            genero = input("Novo género: ").strip() or None
+            max_jogadores = input("Novo número máximo de jogadores: ").strip()
+            max_jogadores = int(max_jogadores) if max_jogadores else None
+            dependencia_lingua = input("Nova dependência de língua (Sim/Não): ").strip() or None
+            complexidade = input("Nova complexidade (1 a 5): ").strip()
+            complexidade = float(complexidade) if complexidade else None
+            link_bgg = input("Novo link BGG: ").strip() or None
+
+            alterar_jogo(id_jogo, nome, genero, max_jogadores, dependencia_lingua, complexidade, link_bgg)
+
+        elif opcao == "5":
+            id_jogo = int(input("ID do jogo a eliminar: "))
+            eliminar_jogo(id_jogo)
 
         elif opcao == "0":
             print("A sair...")
