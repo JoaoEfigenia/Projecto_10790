@@ -1,16 +1,16 @@
 import sqlite3
 import os
+import tkinter as tk
+from tkinter import ttk, messagebox, simpledialog
 
 DB_PATH = "db/biblioteca_jogos.db"
 
 def criar_bd():
     if not os.path.exists("db"):
         os.makedirs("db")
-
     conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    cursor.execute('''
+    c = conn.cursor()
+    c.execute('''
         CREATE TABLE IF NOT EXISTS Jogos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nome TEXT NOT NULL,
@@ -19,493 +19,586 @@ def criar_bd():
             dependencia_lingua TEXT,
             complexidade REAL CHECK(complexidade BETWEEN 1 AND 5),
             link_bgg TEXT
-        );
+        )
     ''')
-
-    cursor.execute('''
+    c.execute('''
         CREATE TABLE IF NOT EXISTS Jogadores (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nome TEXT NOT NULL,
             vitorias INTEGER DEFAULT 0
-        );
+        )
     ''')
-
-    cursor.execute('''
+    c.execute('''
         CREATE TABLE IF NOT EXISTS Partidas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            id_jogo INTEGER,
-            data TEXT,
+            id_jogo INTEGER NOT NULL,
+            data TEXT NOT NULL,
+            jogadores TEXT NOT NULL,
             vencedor_id INTEGER,
-            FOREIGN KEY (id_jogo) REFERENCES Jogos(id),
-            FOREIGN KEY (vencedor_id) REFERENCES Jogadores(id)
-        );
+            FOREIGN KEY(id_jogo) REFERENCES Jogos(id),
+            FOREIGN KEY(vencedor_id) REFERENCES Jogadores(id)
+        )
     ''')
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS Partidas_Jogadores (
-            id_partida INTEGER,
-            id_jogador INTEGER,
-            FOREIGN KEY (id_partida) REFERENCES Partidas(id),
-            FOREIGN KEY (id_jogador) REFERENCES Jogadores(id)
-        );
-    ''')
-
     conn.commit()
     conn.close()
 
-def adicionar_jogo():
-    nome = input("Nome do jogo: ")
-    genero = input("Género: ")
-    max_jogadores = int(input("Número máximo de jogadores: "))
-    dependencia_lingua = input("Dependência de língua (S/N): ").upper()
-    complexidade = float(input("Complexidade (1 a 5): "))
-    link_bgg = input("Link BGG: ")
+class BibliotecaJogosApp(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Biblioteca de Jogos de Tabuleiro")
+        self.geometry("900x600")
+        self.resizable(False, False)
 
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+        self.create_widgets()
+        criar_bd()
+        self.carregar_todos()
 
-    cursor.execute('''
-        INSERT INTO Jogos (nome, genero, max_jogadores, dependencia_lingua, complexidade, link_bgg)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (nome, genero, max_jogadores, dependencia_lingua, complexidade, link_bgg))
+    def create_widgets(self):
+        self.tabControl = ttk.Notebook(self)
+        self.tab_jogos = ttk.Frame(self.tabControl)
+        self.tab_jogadores = ttk.Frame(self.tabControl)
+        self.tab_partidas = ttk.Frame(self.tabControl)
 
-    conn.commit()
-    conn.close()
-    print(f"Jogo '{nome}' adicionado com sucesso!")
+        self.tabControl.add(self.tab_jogos, text='Jogos')
+        self.tabControl.add(self.tab_jogadores, text='Jogadores')
+        self.tabControl.add(self.tab_partidas, text='Partidas')
+        self.tabControl.pack(expand=1, fill="both")
 
-def listar_jogos():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+        self.setup_tab_jogos()
+        self.setup_tab_jogadores()
+        self.setup_tab_partidas()
 
-    cursor.execute("SELECT id, nome, genero, max_jogadores, dependencia_lingua, complexidade, link_bgg FROM Jogos")
-    jogos = cursor.fetchall()
+    ### --- Jogos Tab ---
+    def setup_tab_jogos(self):
+        frame = self.tab_jogos
 
-    conn.close()
-    if not jogos:
-        print("Não há jogos registados.")
-    else:
-        for jogo in jogos:
-            print(f"ID: {jogo[0]}, Nome: {jogo[1]}, Género: {jogo[2]}, Max Jogadores: {jogo[3]}, Dependência de Língua: {jogo[4]}, Complexidade: {jogo[5]}, Link BGG: {jogo[6]}")
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill='x', padx=5, pady=5)
 
-def editar_jogo():
-    listar_jogos()
-    jogo_id = input("ID do jogo que quer editar: ")
+        ttk.Button(btn_frame, text="Adicionar Jogo", command=self.adicionar_jogo_popup).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="Editar Jogo", command=self.editar_jogo_popup).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="Eliminar Jogo", command=self.eliminar_jogo).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="Filtrar Jogos", command=self.filtrar_jogos_popup).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="Atualizar Lista", command=self.listar_jogos).pack(side='left', padx=5)
 
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+        columns = ("id", "nome", "genero", "max_jogadores", "dependencia_lingua", "complexidade", "link_bgg")
+        self.tree_jogos = ttk.Treeview(frame, columns=columns, show='headings', selectmode='browse')
+        for col in columns:
+            self.tree_jogos.heading(col, text=col.capitalize())
+            self.tree_jogos.column(col, width=110 if col!="link_bgg" else 200)
+        self.tree_jogos.pack(expand=True, fill='both', padx=5, pady=5)
 
-    cursor.execute("SELECT * FROM Jogos WHERE id = ?", (jogo_id,))
-    jogo = cursor.fetchone()
-    if not jogo:
-        print("Jogo não encontrado.")
-        conn.close()
-        return
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self.tree_jogos.yview)
+        self.tree_jogos.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side='right', fill='y')
 
-    nome = input(f"Nome ({jogo[1]}): ") or jogo[1]
-    genero = input(f"Género ({jogo[2]}): ") or jogo[2]
-    max_jogadores = input(f"Número máximo de jogadores ({jogo[3]}): ") or jogo[3]
-    dependencia_lingua = input(f"Dependência de língua (S/N) ({jogo[4]}): ").upper() or jogo[4]
-    complexidade = input(f"Complexidade (1 a 5) ({jogo[5]}): ") or jogo[5]
-    link_bgg = input(f"Link BGG ({jogo[6]}): ") or jogo[6]
-
-    try:
-        max_jogadores = int(max_jogadores)
-        complexidade = float(complexidade)
-    except ValueError:
-        print("Número máximo de jogadores deve ser inteiro e complexidade deve ser número (float).")
-        conn.close()
-        return
-
-    cursor.execute('''
-        UPDATE Jogos SET nome = ?, genero = ?, max_jogadores = ?, dependencia_lingua = ?, complexidade = ?, link_bgg = ?
-        WHERE id = ?
-    ''', (nome, genero, max_jogadores, dependencia_lingua, complexidade, link_bgg, jogo_id))
-
-    conn.commit()
-    conn.close()
-    print("Jogo atualizado com sucesso!")
-
-def eliminar_jogo():
-    listar_jogos()
-    jogo_id = input("ID do jogo que quer eliminar: ")
-
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT * FROM Jogos WHERE id = ?", (jogo_id,))
-    jogo = cursor.fetchone()
-    if not jogo:
-        print("Jogo não encontrado.")
-        conn.close()
-        return
-
-    confirm = input(f"Tem certeza que quer eliminar o jogo '{jogo[1]}'? (S/N): ").upper()
-    if confirm == 'S':
-        cursor.execute("DELETE FROM Jogos WHERE id = ?", (jogo_id,))
-        conn.commit()
-        print("Jogo eliminado com sucesso!")
-    else:
-        print("Eliminação cancelada.")
-    conn.close()
-
-def adicionar_jogador():
-    nome = input("Nome do jogador: ")
-
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    cursor.execute("INSERT INTO Jogadores (nome, vitorias) VALUES (?, ?)", (nome, 0))
-
-    conn.commit()
-    conn.close()
-    print(f"Jogador '{nome}' adicionado com sucesso!")
-
-def listar_jogadores():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT id, nome, vitorias FROM Jogadores")
-    jogadores = cursor.fetchall()
-
-    conn.close()
-    if not jogadores:
-        print("Não há jogadores registados.")
-    else:
-        for jogador in jogadores:
-            print(f"ID: {jogador[0]}, Nome: {jogador[1]}, Vitórias: {jogador[2]}")
-
-def eliminar_jogador():
-    listar_jogadores()
-    jogador_id = input("ID do jogador que quer eliminar: ")
-
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT * FROM Jogadores WHERE id = ?", (jogador_id,))
-    jogador = cursor.fetchone()
-    if not jogador:
-        print("Jogador não encontrado.")
-        conn.close()
-        return
-
-    confirm = input(f"Tem certeza que quer eliminar o jogador '{jogador[1]}'? (S/N): ").upper()
-    if confirm == 'S':
-        cursor.execute("DELETE FROM Jogadores WHERE id = ?", (jogador_id,))
-        conn.commit()
-        print("Jogador eliminado com sucesso!")
-    else:
-        print("Eliminação cancelada.")
-    conn.close()
-
-def registar_partida():
-    listar_jogos()
-    id_jogo = input("ID do jogo jogado: ")
-
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT * FROM Jogos WHERE id = ?", (id_jogo,))
-    jogo = cursor.fetchone()
-    if not jogo:
-        print("Jogo não encontrado.")
-        conn.close()
-        return
-
-    data = input("Data da partida (YYYY-MM-DD): ")
-    listar_jogadores()
-    vencedor_id = input("ID do vencedor: ")
-
-    cursor.execute("SELECT * FROM Jogadores WHERE id = ?", (vencedor_id,))
-    vencedor = cursor.fetchone()
-    if not vencedor:
-        print("Jogador vencedor não encontrado.")
-        conn.close()
-        return
-
-    cursor.execute("INSERT INTO Partidas (id_jogo, data, vencedor_id) VALUES (?, ?, ?)", (id_jogo, data, vencedor_id))
-    partida_id = cursor.lastrowid
-
-    jogadores_partida = input("IDs dos jogadores participantes (separados por vírgula): ").split(",")
-    for j_id in jogadores_partida:
-        j_id = j_id.strip()
-        cursor.execute("SELECT * FROM Jogadores WHERE id = ?", (j_id,))
-        if cursor.fetchone():
-            cursor.execute("INSERT INTO Partidas_Jogadores (id_partida, id_jogador) VALUES (?, ?)", (partida_id, j_id))
-
-    conn.commit()
-    conn.close()
-    print("Partida registada com sucesso!")
-
-def listar_partidas():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    cursor.execute('''
-        SELECT p.id, j.nome, p.data, jog.nome
-        FROM Partidas p
-        LEFT JOIN Jogos j ON p.id_jogo = j.id
-        LEFT JOIN Jogadores jog ON p.vencedor_id = jog.id
-    ''')
-    partidas = cursor.fetchall()
-
-    if not partidas:
-        print("Não há partidas registadas.")
-        conn.close()
-        return
-
-    for partida in partidas:
-        partida_id = partida[0]
-        jogo_nome = partida[1]
-        data = partida[2]
-        vencedor_nome = partida[3]
-
-        cursor.execute('''
-            SELECT jog.nome
-            FROM Partidas_Jogadores pj
-            JOIN Jogadores jog ON pj.id_jogador = jog.id
-            WHERE pj.id_partida = ?
-        ''', (partida_id,))
-        jogadores = cursor.fetchall()
-        nomes_jogadores = ", ".join([j[0] for j in jogadores])
-
-        print(f"ID: {partida_id}, Jogo: {jogo_nome}, Data: {data}, Vencedor: {vencedor_nome}, Jogadores: {nomes_jogadores}")
-
-    conn.close()
-
-def eliminar_partida():
-    listar_partidas()
-    partida_id = input("ID da partida que quer eliminar: ")
-
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT * FROM Partidas WHERE id = ?", (partida_id,))
-    partida = cursor.fetchone()
-    if not partida:
-        print("Partida não encontrada.")
-        conn.close()
-        return
-
-    confirm = input("Tem certeza que quer eliminar esta partida? (S/N): ").upper()
-    if confirm == 'S':
-        cursor.execute("DELETE FROM Partidas_Jogadores WHERE id_partida = ?", (partida_id,))
-        cursor.execute("DELETE FROM Partidas WHERE id = ?", (partida_id,))
-        conn.commit()
-        print("Partida eliminada com sucesso!")
-    else:
-        print("Eliminação cancelada.")
-    conn.close()
-
-def filtrar_jogos():
-    print("Preencha os filtros desejados (deixe vazio para ignorar):")
-    nome = input("Nome: ").strip()
-    genero = input("Género: ").strip()
-    max_jogadores = input("Número máximo de jogadores: ").strip()
-    dependencia_lingua = input("Dependência de língua (S/N): ").strip().upper()
-    complexidade_min = input("Complexidade mínima (1 a 5): ").strip()
-    complexidade_max = input("Complexidade máxima (1 a 5): ").strip()
-    
-    filtro_nao_jogados = input("Filtrar jogos que o jogador ainda não jogou? (S/N): ").strip().upper()
-    
-    jogador_id = None
-    if filtro_nao_jogados == "S":
-        jogador_nome = input("Nome do jogador para filtro: ").strip()
+    def listar_jogos(self, filtros=None):
         conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT id FROM Jogadores WHERE nome = ?", (jogador_nome,))
-        resultado = cursor.fetchone()
-        if resultado:
-            jogador_id = resultado[0]
-        else:
-            print(f"Jogador '{jogador_nome}' não encontrado. Ignorando filtro de não jogados.")
+        c = conn.cursor()
+        query = "SELECT id, nome, genero, max_jogadores, dependencia_lingua, complexidade, link_bgg FROM Jogos"
+        params = []
+        if filtros:
+            where_clauses = []
+            if filtros.get('nome'):
+                where_clauses.append("nome LIKE ?")
+                params.append(f"%{filtros['nome']}%")
+            if filtros.get('genero'):
+                where_clauses.append("genero LIKE ?")
+                params.append(f"%{filtros['genero']}%")
+            if filtros.get('max_jogadores'):
+                where_clauses.append("max_jogadores >= ?")
+                params.append(filtros['max_jogadores'])
+            if filtros.get('dependencia_lingua'):
+                where_clauses.append("dependencia_lingua = ?")
+                params.append(filtros['dependencia_lingua'])
+            if filtros.get('complexidade_max'):
+                where_clauses.append("complexidade <= ?")
+                params.append(filtros['complexidade_max'])
+            if where_clauses:
+                query += " WHERE " + " AND ".join(where_clauses)
+        c.execute(query, params)
+        rows = c.fetchall()
         conn.close()
 
-    query = "SELECT id, nome, genero, max_jogadores, dependencia_lingua, complexidade, link_bgg FROM Jogos WHERE 1=1"
-    params = []
+        self.tree_jogos.delete(*self.tree_jogos.get_children())
+        for row in rows:
+            self.tree_jogos.insert("", "end", values=row)
 
-    if nome:
-        query += " AND nome LIKE ?"
-        params.append(f"%{nome}%")
-    if genero:
-        query += " AND genero LIKE ?"
-        params.append(f"%{genero}%")
-    if max_jogadores:
-        try:
-            max_jog = int(max_jogadores)
-            query += " AND max_jogadores = ?"
-            params.append(max_jog)
-        except ValueError:
-            print("Número máximo de jogadores inválido, ignorando este filtro.")
-    if dependencia_lingua in ("S", "N"):
-        query += " AND dependencia_lingua = ?"
-        params.append(dependencia_lingua)
-    if complexidade_min:
-        try:
-            cmin = float(complexidade_min)
-            query += " AND complexidade >= ?"
-            params.append(cmin)
-        except ValueError:
-            print("Complexidade mínima inválida, ignorando este filtro.")
-    if complexidade_max:
-        try:
-            cmax = float(complexidade_max)
-            query += " AND complexidade <= ?"
-            params.append(cmax)
-        except ValueError:
-            print("Complexidade máxima inválida, ignorando este filtro.")
+    def adicionar_jogo_popup(self):
+        popup = tk.Toplevel(self)
+        popup.title("Adicionar Jogo")
+        popup.geometry("400x350")
+        popup.resizable(False, False)
 
-    if jogador_id:
-        query = f'''
-            SELECT j.id, j.nome, j.genero, j.max_jogadores, j.dependencia_lingua, j.complexidade, j.link_bgg
-            FROM Jogos j
-            WHERE j.id NOT IN (
-                SELECT id_jogo FROM Partidas p
-                INNER JOIN Partidas_Jogadores pj ON p.id = pj.id_partida
-                WHERE pj.id_jogador = ?
-            )
+        labels = ["Nome", "Gênero", "Número máximo de jogadores", "Dependência de língua (S/N)", "Complexidade (1-5)", "Link BGG"]
+        entries = []
+
+        for i, label in enumerate(labels):
+            ttk.Label(popup, text=label).pack(pady=3)
+            ent = ttk.Entry(popup, width=40)
+            ent.pack()
+            entries.append(ent)
+
+        def salvar():
+            try:
+                nome = entries[0].get().strip()
+                genero = entries[1].get().strip()
+                max_jog = int(entries[2].get().strip())
+                dep_lingua = entries[3].get().strip().upper()
+                if dep_lingua not in ('S', 'N'):
+                    raise ValueError("Dependência de língua deve ser 'S' ou 'N'")
+                complexidade = float(entries[4].get().strip())
+                if not (1 <= complexidade <= 5):
+                    raise ValueError("Complexidade deve estar entre 1 e 5")
+                link = entries[5].get().strip()
+
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute('''
+                    INSERT INTO Jogos (nome, genero, max_jogadores, dependencia_lingua, complexidade, link_bgg)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (nome, genero, max_jog, dep_lingua, complexidade, link))
+                conn.commit()
+                conn.close()
+                popup.destroy()
+                self.listar_jogos()
+            except Exception as e:
+                messagebox.showerror("Erro", str(e))
+
+        ttk.Button(popup, text="Salvar", command=salvar).pack(pady=10)
+        ttk.Button(popup, text="Cancelar", command=popup.destroy).pack()
+
+    def editar_jogo_popup(self):
+        selected = self.tree_jogos.focus()
+        if not selected:
+            messagebox.showwarning("Aviso", "Selecione um jogo para editar.")
+            return
+        values = self.tree_jogos.item(selected, 'values')
+
+        popup = tk.Toplevel(self)
+        popup.title("Editar Jogo")
+        popup.geometry("400x350")
+        popup.resizable(False, False)
+
+        labels = ["Nome", "Gênero", "Número máximo de jogadores", "Dependência de língua (S/N)", "Complexidade (1-5)", "Link BGG"]
+        entries = []
+
+        for i, label in enumerate(labels):
+            ttk.Label(popup, text=label).pack(pady=3)
+            ent = ttk.Entry(popup, width=40)
+            ent.insert(0, values[i+1])
+            ent.pack()
+            entries.append(ent)
+
+        def salvar():
+            try:
+                nome = entries[0].get().strip()
+                genero = entries[1].get().strip()
+                max_jog = int(entries[2].get().strip())
+                dep_lingua = entries[3].get().strip().upper()
+                if dep_lingua not in ('S', 'N'):
+                    raise ValueError("Dependência de língua deve ser 'S' ou 'N'")
+                complexidade = float(entries[4].get().strip())
+                if not (1 <= complexidade <= 5):
+                    raise ValueError("Complexidade deve estar entre 1 e 5")
+                link = entries[5].get().strip()
+
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute('''
+                    UPDATE Jogos SET nome=?, genero=?, max_jogadores=?, dependencia_lingua=?, complexidade=?, link_bgg=?
+                    WHERE id=?
+                ''', (nome, genero, max_jog, dep_lingua, complexidade, link, values[0]))
+                conn.commit()
+                conn.close()
+                popup.destroy()
+                self.listar_jogos()
+            except Exception as e:
+                messagebox.showerror("Erro", str(e))
+
+        ttk.Button(popup, text="Salvar", command=salvar).pack(pady=10)
+        ttk.Button(popup, text="Cancelar", command=popup.destroy).pack()
+
+    def eliminar_jogo(self):
+        selected = self.tree_jogos.focus()
+        if not selected:
+            messagebox.showwarning("Aviso", "Selecione um jogo para eliminar.")
+            return
+        values = self.tree_jogos.item(selected, 'values')
+        res = messagebox.askyesno("Confirmar", f"Tem certeza que deseja eliminar o jogo '{values[1]}'?")
+        if res:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("DELETE FROM Jogos WHERE id=?", (values[0],))
+            conn.commit()
+            conn.close()
+            self.listar_jogos()
+
+    def filtrar_jogos_popup(self):
+        popup = tk.Toplevel(self)
+        popup.title("Filtrar Jogos")
+        popup.geometry("350x400")
+        popup.resizable(False, False)
+
+        labels = [
+            "Nome contém",
+            "Gênero contém",
+            "Número mínimo de jogadores",
+            "Dependência de língua (S/N)",
+            "Complexidade máxima"
+        ]
+        entries = []
+        for label in labels:
+            ttk.Label(popup, text=label).pack(pady=3)
+            ent = ttk.Entry(popup)
+            ent.pack()
+            entries.append(ent)
+
+        def aplicar_filtro():
+            filtros = {}
+            if entries[0].get().strip():
+                filtros['nome'] = entries[0].get().strip()
+            if entries[1].get().strip():
+                filtros['genero'] = entries[1].get().strip()
+            if entries[2].get().strip():
+                try:
+                    filtros['max_jogadores'] = int(entries[2].get().strip())
+                except:
+                    messagebox.showerror("Erro", "Número máximo de jogadores inválido")
+                    return
+            if entries[3].get().strip().upper() in ('S', 'N'):
+                filtros['dependencia_lingua'] = entries[3].get().strip().upper()
+            if entries[4].get().strip():
+                try:
+                    filtros['complexidade_max'] = float(entries[4].get().strip())
+                except:
+                    messagebox.showerror("Erro", "Complexidade máxima inválida")
+                    return
+            self.listar_jogos(filtros)
+            popup.destroy()
+
+        ttk.Button(popup, text="Aplicar", command=aplicar_filtro).pack(pady=10)
+        ttk.Button(popup, text="Cancelar", command=popup.destroy).pack()
+
+    ### --- Jogadores Tab ---
+    def setup_tab_jogadores(self):
+        frame = self.tab_jogadores
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill='x', padx=5, pady=5)
+
+        ttk.Button(btn_frame, text="Adicionar Jogador", command=self.adicionar_jogador_popup).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="Editar Jogador", command=self.editar_jogador_popup).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="Eliminar Jogador", command=self.eliminar_jogador).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="Atualizar Lista", command=self.listar_jogadores).pack(side='left', padx=5)
+
+        columns = ("id", "nome", "vitorias")
+        self.tree_jogadores = ttk.Treeview(frame, columns=columns, show='headings', selectmode='browse')
+        for col in columns:
+            self.tree_jogadores.heading(col, text=col.capitalize())
+            self.tree_jogadores.column(col, width=200 if col=="nome" else 100)
+        self.tree_jogadores.pack(expand=True, fill='both', padx=5, pady=5)
+
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self.tree_jogadores.yview)
+        self.tree_jogadores.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side='right', fill='y')
+
+    def listar_jogadores(self):
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT id, nome, vitorias FROM Jogadores")
+        rows = c.fetchall()
+        conn.close()
+
+        self.tree_jogadores.delete(*self.tree_jogadores.get_children())
+        for row in rows:
+            self.tree_jogadores.insert("", "end", values=row)
+
+    def adicionar_jogador_popup(self):
+        popup = tk.Toplevel(self)
+        popup.title("Adicionar Jogador")
+        popup.geometry("300x150")
+        popup.resizable(False, False)
+
+        ttk.Label(popup, text="Nome do jogador").pack(pady=10)
+        nome_entry = ttk.Entry(popup, width=40)
+        nome_entry.pack()
+
+        def salvar():
+            nome = nome_entry.get().strip()
+            if not nome:
+                messagebox.showerror("Erro", "Nome não pode estar vazio")
+                return
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("INSERT INTO Jogadores (nome, vitorias) VALUES (?, 0)", (nome,))
+            conn.commit()
+            conn.close()
+            popup.destroy()
+            self.listar_jogadores()
+
+        ttk.Button(popup, text="Salvar", command=salvar).pack(pady=10)
+        ttk.Button(popup, text="Cancelar", command=popup.destroy).pack()
+
+    def editar_jogador_popup(self):
+        selected = self.tree_jogadores.focus()
+        if not selected:
+            messagebox.showwarning("Aviso", "Selecione um jogador para editar.")
+            return
+        values = self.tree_jogadores.item(selected, 'values')
+
+        popup = tk.Toplevel(self)
+        popup.title("Editar Jogador")
+        popup.geometry("300x180")
+        popup.resizable(False, False)
+
+        ttk.Label(popup, text="Nome do jogador").pack(pady=5)
+        nome_entry = ttk.Entry(popup, width=40)
+        nome_entry.insert(0, values[1])
+        nome_entry.pack()
+
+        ttk.Label(popup, text="Número de vitórias").pack(pady=5)
+        vitorias_entry = ttk.Entry(popup, width=40)
+        vitorias_entry.insert(0, str(values[2]))
+        vitorias_entry.pack()
+
+        def salvar():
+            nome = nome_entry.get().strip()
+            try:
+                vitorias = int(vitorias_entry.get().strip())
+                if vitorias < 0:
+                    raise ValueError
+            except:
+                messagebox.showerror("Erro", "Vitórias deve ser um inteiro não negativo")
+                return
+            if not nome:
+                messagebox.showerror("Erro", "Nome não pode estar vazio")
+                return
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("UPDATE Jogadores SET nome=?, vitorias=? WHERE id=?", (nome, vitorias, values[0]))
+            conn.commit()
+            conn.close()
+            popup.destroy()
+            self.listar_jogadores()
+
+        ttk.Button(popup, text="Salvar", command=salvar).pack(pady=10)
+        ttk.Button(popup, text="Cancelar", command=popup.destroy).pack()
+
+    def eliminar_jogador(self):
+        selected = self.tree_jogadores.focus()
+        if not selected:
+            messagebox.showwarning("Aviso", "Selecione um jogador para eliminar.")
+            return
+        values = self.tree_jogadores.item(selected, 'values')
+        res = messagebox.askyesno("Confirmar", f"Tem certeza que deseja eliminar o jogador '{values[1]}'?")
+        if res:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("DELETE FROM Jogadores WHERE id=?", (values[0],))
+            conn.commit()
+            conn.close()
+            self.listar_jogadores()
+
+    ### --- Partidas Tab ---
+    def setup_tab_partidas(self):
+        frame = self.tab_partidas
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill='x', padx=5, pady=5)
+
+        ttk.Button(btn_frame, text="Registar Partida", command=self.registar_partida_popup).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="Editar Partida", command=self.editar_partida_popup).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="Eliminar Partida", command=self.eliminar_partida).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="Atualizar Lista", command=self.listar_partidas).pack(side='left', padx=5)
+
+        columns = ("id", "jogo", "data", "jogadores", "vencedor")
+        self.tree_partidas = ttk.Treeview(frame, columns=columns, show='headings', selectmode='browse')
+        for col in columns:
+            self.tree_partidas.heading(col, text=col.capitalize())
+            self.tree_partidas.column(col, width=150 if col!="id" else 50)
+        self.tree_partidas.pack(expand=True, fill='both', padx=5, pady=5)
+
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self.tree_partidas.yview)
+        self.tree_partidas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side='right', fill='y')
+
+    def listar_partidas(self):
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        query = '''
+            SELECT p.id, j.nome, p.data, p.jogadores,
+                (SELECT nome FROM Jogadores WHERE id = p.vencedor_id) 
+            FROM Partidas p
+            JOIN Jogos j ON p.id_jogo = j.id
         '''
-        filtros_restantes = []
-        params_restantes = [jogador_id]
-
-        if nome:
-            filtros_restantes.append("j.nome LIKE ?")
-            params_restantes.append(f"%{nome}%")
-        if genero:
-            filtros_restantes.append("j.genero LIKE ?")
-            params_restantes.append(f"%{genero}%")
-        if max_jogadores:
-            try:
-                max_jog = int(max_jogadores)
-                filtros_restantes.append("j.max_jogadores = ?")
-                params_restantes.append(max_jog)
-            except ValueError:
-                pass
-        if dependencia_lingua in ("S", "N"):
-            filtros_restantes.append("j.dependencia_lingua = ?")
-            params_restantes.append(dependencia_lingua)
-        if complexidade_min:
-            try:
-                cmin = float(complexidade_min)
-                filtros_restantes.append("j.complexidade >= ?")
-                params_restantes.append(cmin)
-            except ValueError:
-                pass
-        if complexidade_max:
-            try:
-                cmax = float(complexidade_max)
-                filtros_restantes.append("j.complexidade <= ?")
-                params_restantes.append(cmax)
-            except ValueError:
-                pass
-
-        if filtros_restantes:
-            query += " AND " + " AND ".join(filtros_restantes)
-
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute(query, params_restantes)
-        jogos = cursor.fetchall()
-        conn.close()
-    else:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute(query, params)
-        jogos = cursor.fetchall()
+        c.execute(query)
+        rows = c.fetchall()
         conn.close()
 
-    if not jogos:
-        print("Nenhum jogo encontrado com esses filtros.")
-    else:
-        for jogo in jogos:
-            print(f"ID: {jogo[0]}, Nome: {jogo[1]}, Género: {jogo[2]}, Max Jogadores: {jogo[3]}, Dependência Língua: {jogo[4]}, Complexidade: {jogo[5]}, Link BGG: {jogo[6]}")
+        self.tree_partidas.delete(*self.tree_partidas.get_children())
+        for row in rows:
+            vencedor = row[4] if row[4] else ""
+            self.tree_partidas.insert("", "end", values=(row[0], row[1], row[2], row[3], vencedor))
 
-def menu_jogos():
-    while True:
-        print("\n--- Menu Jogos ---")
-        print("1 - Adicionar Jogo")
-        print("2 - Editar Jogo")
-        print("3 - Eliminar Jogo")
-        print("4 - Listar Jogos")
-        print("5 - Filtrar Jogos")
-        print("0 - Voltar")
-        escolha = input("Escolha uma opção: ")
+    def registar_partida_popup(self):
+        popup = tk.Toplevel(self)
+        popup.title("Registar Partida")
+        popup.geometry("400x450")
+        popup.resizable(False, False)
 
-        if escolha == "1":
-            adicionar_jogo()
-        elif escolha == "2":
-            editar_jogo()
-        elif escolha == "3":
-            eliminar_jogo()
-        elif escolha == "4":
-            listar_jogos()
-        elif escolha == "5":
-            filtrar_jogos()
-        elif escolha == "0":
-            break
-        else:
-            print("Opção inválida.")
+        ttk.Label(popup, text="Jogo").pack(pady=3)
+        jogos = self.get_jogos()
+        jogo_var = tk.StringVar()
+        jogo_combo = ttk.Combobox(popup, textvariable=jogo_var, values=[f"{j[0]}: {j[1]}" for j in jogos], state='readonly')
+        jogo_combo.pack()
 
-def menu_jogadores():
-    while True:
-        print("\n--- Menu Jogadores ---")
-        print("1 - Adicionar Jogador")
-        print("2 - Listar Jogadores")
-        print("3 - Eliminar Jogador")
-        print("0 - Voltar")
-        escolha = input("Escolha uma opção: ")
+        ttk.Label(popup, text="Data (YYYY-MM-DD)").pack(pady=3)
+        data_entry = ttk.Entry(popup)
+        data_entry.pack()
 
-        if escolha == "1":
-            adicionar_jogador()
-        elif escolha == "2":
-            listar_jogadores()
-        elif escolha == "3":
-            eliminar_jogador()
-        elif escolha == "0":
-            break
-        else:
-            print("Opção inválida.")
+        ttk.Label(popup, text="Jogadores (IDs separados por vírgula)").pack(pady=3)
+        jogadores_entry = ttk.Entry(popup)
+        jogadores_entry.pack()
 
-def menu_partidas():
-    while True:
-        print("\n--- Menu Partidas ---")
-        print("1 - Registar Partida")
-        print("2 - Listar Partidas")
-        print("3 - Eliminar Partida")
-        print("0 - Voltar")
-        escolha = input("Escolha uma opção: ")
+        ttk.Label(popup, text="Vencedor (ID)").pack(pady=3)
+        vencedor_entry = ttk.Entry(popup)
+        vencedor_entry.pack()
 
-        if escolha == "1":
-            registar_partida()
-        elif escolha == "2":
-            listar_partidas()
-        elif escolha == "3":
-            eliminar_partida()
-        elif escolha == "0":
-            break
-        else:
-            print("Opção inválida.")
+        def salvar():
+            try:
+                if not jogo_var.get():
+                    raise ValueError("Selecione um jogo")
+                id_jogo = int(jogo_var.get().split(":")[0])
+                data = data_entry.get().strip()
+                jogadores_str = jogadores_entry.get().strip()
+                vencedor_str = vencedor_entry.get().strip()
+                if not jogadores_str:
+                    raise ValueError("Informe os IDs dos jogadores")
+                jogadores = ",".join([j.strip() for j in jogadores_str.split(",")])
+                vencedor_id = int(vencedor_str) if vencedor_str else None
 
-def menu_principal():
-    criar_bd()
-    while True:
-        print("\n--- Menu Principal ---")
-        print("1 - Jogos")
-        print("2 - Jogadores")
-        print("3 - Partidas")
-        print("0 - Sair")
-        escolha = input("Escolha uma opção: ")
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute('''
+                    INSERT INTO Partidas (id_jogo, data, jogadores, vencedor_id) VALUES (?, ?, ?, ?)
+                ''', (id_jogo, data, jogadores, vencedor_id))
+                conn.commit()
+                conn.close()
+                popup.destroy()
+                self.listar_partidas()
+            except Exception as e:
+                messagebox.showerror("Erro", str(e))
 
-        if escolha == "1":
-            menu_jogos()
-        elif escolha == "2":
-            menu_jogadores()
-        elif escolha == "3":
-            menu_partidas()
-        elif escolha == "0":
-            print("Adeus!")
-            break
-        else:
-            print("Opção inválida.")
+        ttk.Button(popup, text="Salvar", command=salvar).pack(pady=10)
+        ttk.Button(popup, text="Cancelar", command=popup.destroy).pack()
+
+    def editar_partida_popup(self):
+        selected = self.tree_partidas.focus()
+        if not selected:
+            messagebox.showwarning("Aviso", "Selecione uma partida para editar.")
+            return
+        values = self.tree_partidas.item(selected, 'values')
+
+        popup = tk.Toplevel(self)
+        popup.title("Editar Partida")
+        popup.geometry("400x450")
+        popup.resizable(False, False)
+
+        ttk.Label(popup, text="Jogo").pack(pady=3)
+        jogos = self.get_jogos()
+        jogo_var = tk.StringVar()
+        jogo_combo = ttk.Combobox(popup, textvariable=jogo_var, values=[f"{j[0]}: {j[1]}" for j in jogos], state='readonly')
+        for j in jogos:
+            if j[1] == values[1]:
+                jogo_var.set(f"{j[0]}: {j[1]}")
+                break
+        jogo_combo.pack()
+
+        ttk.Label(popup, text="Data (YYYY-MM-DD)").pack(pady=3)
+        data_entry = ttk.Entry(popup)
+        data_entry.insert(0, values[2])
+        data_entry.pack()
+
+        ttk.Label(popup, text="Jogadores (IDs separados por vírgula)").pack(pady=3)
+        jogadores_entry = ttk.Entry(popup)
+        jogadores_entry.insert(0, values[3])
+        jogadores_entry.pack()
+
+        ttk.Label(popup, text="Vencedor (ID)").pack(pady=3)
+        vencedor_id = self.get_id_jogador_por_nome(values[4])
+        vencedor_entry = ttk.Entry(popup)
+        vencedor_entry.insert(0, str(vencedor_id) if vencedor_id else "")
+        vencedor_entry.pack()
+
+        def salvar():
+            try:
+                if not jogo_var.get():
+                    raise ValueError("Selecione um jogo")
+                id_jogo = int(jogo_var.get().split(":")[0])
+                data = data_entry.get().strip()
+                jogadores_str = jogadores_entry.get().strip()
+                vencedor_str = vencedor_entry.get().strip()
+                if not jogadores_str:
+                    raise ValueError("Informe os IDs dos jogadores")
+                jogadores = ",".join([j.strip() for j in jogadores_str.split(",")])
+                vencedor_id_val = int(vencedor_str) if vencedor_str else None
+
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute('''
+                    UPDATE Partidas SET id_jogo=?, data=?, jogadores=?, vencedor_id=?
+                    WHERE id=?
+                ''', (id_jogo, data, jogadores, vencedor_id_val, values[0]))
+                conn.commit()
+                conn.close()
+                popup.destroy()
+                self.listar_partidas()
+            except Exception as e:
+                messagebox.showerror("Erro", str(e))
+
+        ttk.Button(popup, text="Salvar", command=salvar).pack(pady=10)
+        ttk.Button(popup, text="Cancelar", command=popup.destroy).pack()
+
+    def eliminar_partida(self):
+        selected = self.tree_partidas.focus()
+        if not selected:
+            messagebox.showwarning("Aviso", "Selecione uma partida para eliminar.")
+            return
+        values = self.tree_partidas.item(selected, 'values')
+        res = messagebox.askyesno("Confirmar", f"Tem certeza que deseja eliminar a partida ID {values[0]}?")
+        if res:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("DELETE FROM Partidas WHERE id=?", (values[0],))
+            conn.commit()
+            conn.close()
+            self.listar_partidas()
+
+    ### --- Utilitários ---
+    def get_jogos(self):
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT id, nome FROM Jogos")
+        jogos = c.fetchall()
+        conn.close()
+        return jogos
+
+    def get_id_jogador_por_nome(self, nome):
+        if not nome:
+            return None
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT id FROM Jogadores WHERE nome = ?", (nome,))
+        row = c.fetchone()
+        conn.close()
+        return row[0] if row else None
+
+    def carregar_todos(self):
+        self.listar_jogos()
+        self.listar_jogadores()
+        self.listar_partidas()
 
 if __name__ == "__main__":
-    menu_principal()
+    app = BibliotecaJogosApp()
+    app.mainloop()
